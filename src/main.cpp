@@ -40,8 +40,8 @@ float M_angle_P = 50; //250
 float M_velocity_P = 1; //10
 
 //Inline sense and Step/Dir
-LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, PA_0_ALT1, A2, _NC); //ADC2 - PA_0_ALT1, A2
-LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A1, A3, _NC); //ADC1 - A1, A3
+InlineCurrentSense CS1  = InlineCurrentSense(0.01, 50, PA_0_ALT1, A2, _NC); //ADC2 - PA_0_ALT1, A2
+InlineCurrentSense CS2  = InlineCurrentSense(0.01, 50, A1, A3, _NC); //ADC1 - A1, A3
 StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
 void onStep() { SD1.handle(); } 
 
