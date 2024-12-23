@@ -40,8 +40,8 @@ float M_angle_P = 50; //250
 float M_velocity_P = 1; //10
 
 //Inline sense and Step/Dir
-InlineCurrentSense CS1  = InlineCurrentSense(0.01, 50, PA_0_ALT1, A2, _NC); //ADC2 - PA_0_ALT1, A2
-InlineCurrentSense CS2  = InlineCurrentSense(0.01, 50, A1, A3, _NC); //ADC1 - A1, A3
+LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, PA_0_ALT1, A2, _NC); //ADC2 - PA_0_ALT1, A2
+LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A1, A3, _NC); //ADC1 - A1, A3
 StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
 void onStep() { SD1.handle(); } 
 
@@ -57,6 +57,50 @@ void setup() {
   E2.quadrature = Quadrature::ON;
   E2.init();
   E2.enableInterrupts(doA2, doB2);
+
+  //Motor 2
+  M2.linkSensor(&E2);
+
+  // driver config
+  DR2.pwm_frequency = 25000;
+  DR2.voltage_power_supply = voltage_set;
+  DR2.init();
+  CS2.linkDriver(&DR2);
+  M2.linkDriver(&DR2);
+  M2.init();
+  CS2.init();
+  M2.linkCurrentSense(&CS2);
+  M2.voltage_sensor_align = 8;
+  M2.foc_modulation = FOCModulationType::SpaceVectorPWM;
+  M2.controller = MotionControlType::angle;
+  M2.torque_controller = TorqueControlType::foc_current;
+
+  // setting the limits
+  M2.velocity_limit = velocity_set;
+  M2.voltage_limit = voltage_set;
+  M2.current_limit = 1;
+
+  // velocity PID controller parameters
+  M2.PID_velocity.P = M_velocity_P; //0.6
+  M2.PID_velocity.I = 0;
+  M2.PID_velocity.D = 0;
+  M2.PID_velocity.output_ramp = 0;
+  M2.LPF_velocity.Tf = 0.001;
+   
+  // angle PID controller 
+  M2.P_angle.P = M_angle_P; //100 
+  M2.P_angle.I = 0; //0.4
+  M2.P_angle.D = 0; //2.0
+  M2.P_angle.output_ramp = 0;
+  M2.LPF_angle.Tf = 0;
+
+  // foc current control parameters
+  M2.PID_current_q.P = 1;
+  M2.PID_current_q.I= 0.1;
+  M2.PID_current_d.P= 1;
+  M2.PID_current_d.I = 0.1;
+  M2.LPF_current_q.Tf = 0.01; 
+  M2.LPF_current_d.Tf = 0.01; 
 
   M1.linkSensor(&E1);
   // driver config
@@ -102,49 +146,7 @@ void setup() {
   M1.LPF_current_q.Tf = 0.01; 
   M1.LPF_current_d.Tf = 0.01; 
 
-  //Motor 2
-  M2.linkSensor(&E2);
 
-  // driver config
-  DR2.pwm_frequency = 25000;
-  DR2.voltage_power_supply = voltage_set;
-  DR2.init();
-  CS2.linkDriver(&DR2);
-  M2.linkDriver(&DR2);
-  M2.init();
-  CS2.init();
-  M2.linkCurrentSense(&CS2);
-  M2.voltage_sensor_align = 8;
-  M2.foc_modulation = FOCModulationType::SpaceVectorPWM;
-  M2.controller = MotionControlType::angle;
-  M2.torque_controller = TorqueControlType::foc_current;
-
-  // setting the limits
-  M2.velocity_limit = velocity_set;
-  M2.voltage_limit = voltage_set;
-  M2.current_limit = 1;
-
-  // velocity PID controller parameters
-  M2.PID_velocity.P = M_velocity_P; //0.6
-  M2.PID_velocity.I = 0;
-  M2.PID_velocity.D = 0;
-  M2.PID_velocity.output_ramp = 0;
-  M2.LPF_velocity.Tf = 0.001;
-   
-  // angle PID controller 
-  M2.P_angle.P = M_angle_P; //100 
-  M2.P_angle.I = 0; //0.4
-  M2.P_angle.D = 0; //2.0
-  M2.P_angle.output_ramp = 0;
-  M2.LPF_angle.Tf = 0;
-
-  // foc current control parameters
-  M2.PID_current_q.P = 1;
-  M2.PID_current_q.I= 0.1;
-  M2.PID_current_d.P= 1;
-  M2.PID_current_d.I = 0.1;
-  M2.LPF_current_q.Tf = 0.01; 
-  M2.LPF_current_d.Tf = 0.01; 
   
   M1.initFOC(); //skip for open loop
   delay(1000);
