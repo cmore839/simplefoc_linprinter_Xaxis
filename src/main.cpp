@@ -1,64 +1,48 @@
-/**
- * An example code for the generic current sensing implementation
+/** G474 current sense tests
+Generic Sense - defaults - 150us per channel
+Generic Sense - added -O3 - 150us per channel
+Generic Sense - tried PA0 - 150us per channel
+Generic Sense - tried PA_0_ALT1(ADC2) - 150us per channel
+Generic Sense - -DADC_SAMPLINGTIME0 - 150us per channel
+Generic Sense - Canadas1 adc_rebase - 150us per channel
+Generic Sense - -DHAL_ADC_MODULE_ONLY - failed
+Generic Sense - -DHAL_ADC_MODULE_ENABLED - 150us per channel
+Inline Sense - defaults-Canadas adc_rebase - 2-3us for 2 channel
+Inline Sense - defaults/test - 300us for 2 channel
 */
+
+
 #include <SimpleFOC.h>
-
-
 // user defined function for reading the phase currents
 // returning the value per phase in amps
 
-PhaseCurrent_s readCurrentSense(){
-  PhaseCurrent_s c;
-  // dummy example only reading analog pins
-  c.a = analogRead(A0);
-  //c.b = analogRead(A1);
-  //c.c = analogRead(0); // if no 3rd current sense set it to 0
-  return(c);
-
-}
+InlineCurrentSense current_sense = InlineCurrentSense(0.01f, 50.0f, A0, A2);
 PhaseCurrent_s current1;
-// user defined function for intialising the current sense
-// it is optional and if provided it will be called in current_sense.init()
-void initCurrentSense(){
-  pinMode(A0,INPUT);
-  //pinMode(A1,INPUT);
-  //pinMode(A2,INPUT);
-}
-
-
-// GenericCurrentSense class constructor
-// it receives the user defined callback for reading the current sense
-// and optionally the user defined callback for current sense initialisation
-GenericCurrentSense current_sense = GenericCurrentSense(readCurrentSense, initCurrentSense);
 
 float loop_count = 0;
 unsigned long start;
 unsigned long finish;
 unsigned long looptime;
 int loopcounter = 0;
-int loopiter = 10;
+int loopiter = 100;
 
 void setup() {
-
   // use monitoring with serial 
-  //Serial.begin(115200);
+  Serial.begin(115200);
   // enable more verbose output for debugging
   // comment out if not needed
-  //SimpleFOCDebug::enable(&Serial);
-
+  SimpleFOCDebug::enable(&Serial);
   // initialise the current sensing
   current_sense.init();
-
-  // for SimpleFOCShield v2.01/v2.0.2
-  current_sense.gain_b *= -1;
 }
 
 void loop() {
   if (loopcounter == loopiter){
     start = micros();
   }
+  
   current1 = current_sense.getPhaseCurrents();
-  float current_magnitude = current_sense.getDCCurrent();
+
   if (loopcounter == loopiter){
     finish = micros();
     looptime = (finish - start);

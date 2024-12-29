@@ -201,14 +201,14 @@ void _stopTimers(HardwareTimer **timers_to_stop, int timer_num)
 {
   // TODO - stop each timer only once
   // stop timers
-  // for (int i=0; i < timer_num; i++) {
-  //   if(timers_to_stop[i] == NP) return;
-  //   timers_to_stop[i]->pause();
-  //   timers_to_stop[i]->refresh();
-  //   #ifdef SIMPLEFOC_STM32_DEBUG
-  //     SIMPLEFOC_DEBUG("STM32-DRV: Stopping timer ", getTimerNumber(get_timer_index(timers_to_stop[i]->getHandle()->Instance)));
-  //   #endif
-  // }
+  for (int i=0; i < timer_num; i++) {
+    if(timers_to_stop[i] == NP) return;
+    timers_to_stop[i]->pause();
+    timers_to_stop[i]->refresh();
+    #ifdef SIMPLEFOC_STM32_DEBUG
+      SIMPLEFOC_DEBUG("STM32-DRV: Stopping timer ", getTimerNumber(get_timer_index(timers_to_stop[i]->getHandle()->Instance)));
+    #endif
+  }
 }
 
 
