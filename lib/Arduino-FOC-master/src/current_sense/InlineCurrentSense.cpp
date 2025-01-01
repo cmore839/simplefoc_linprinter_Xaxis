@@ -49,7 +49,7 @@ int InlineCurrentSense::init(){
         static_cast<BLDCDriver*>(driver)->setPwm(driver->voltage_limit/2, driver->voltage_limit/2, driver->voltage_limit/2);
     // calibrate zero offsets
     calibrateOffsets();
-    // set zero voltage to all phases
+        // set zero voltage to all phases
     if(driver_type==DriverType::BLDC)
         static_cast<BLDCDriver*>(driver)->setPwm(0,0,0);
     // set the initialized flag
@@ -59,8 +59,10 @@ int InlineCurrentSense::init(){
 }
 // Function finding zero offsets of the ADC
 void InlineCurrentSense::calibrateOffsets(){
-    const int calibration_rounds = 1000;
-    
+    const int calibration_rounds = 10000;
+    // HAL_StatusTypeDef HAL_ADCEx_Calibration_Start(ADC_HandleTypeDef* hadc,uint32_t
+    // SingleDiff); 
+    //uint32_t HAL_ADCEx_Calibration_GetValue(ADC_HandleTypeDef* hadc, uint32_t SingleDiff);
     // find adc offset = zero current voltage
     offset_ia = 0;
     offset_ib = 0;
