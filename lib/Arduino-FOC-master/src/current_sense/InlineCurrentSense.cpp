@@ -59,7 +59,7 @@ int InlineCurrentSense::init(){
 }
 // Function finding zero offsets of the ADC
 void InlineCurrentSense::calibrateOffsets(){
-    const int calibration_rounds = 10000;
+    const int calibration_rounds = 1000;
     // HAL_StatusTypeDef HAL_ADCEx_Calibration_Start(ADC_HandleTypeDef* hadc,uint32_t
     // SingleDiff); 
     //uint32_t HAL_ADCEx_Calibration_GetValue(ADC_HandleTypeDef* hadc, uint32_t SingleDiff);
