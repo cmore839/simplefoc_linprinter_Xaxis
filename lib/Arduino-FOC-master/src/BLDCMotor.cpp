@@ -86,11 +86,14 @@ int BLDCMotor::init() {
   if(_isset(phase_resistance) || torque_controller != TorqueControlType::voltage){
     // velocity control loop controls current
     PID_velocity.limit = current_limit;
+    P_angle.limit = current_limit; // for MotionControlType::angle_nocascade
   }else{
     // velocity control loop controls the voltage
     PID_velocity.limit = voltage_limit;
+    P_angle.limit = voltage_limit; // for MotionControlType::angle_nocascade
   }
-  P_angle.limit = velocity_limit;
+  if (controller!=MotionControlType::angle_nocascade) // if not MotionControlType::angle_nocascade angle PID output is limited by velocity limit
+    P_angle.limit = velocity_limit;
 
   // if using open loop control, set a CW as the default direction if not already set
   if ((controller==MotionControlType::angle_openloop
@@ -105,7 +108,6 @@ int BLDCMotor::init() {
   enable();
   _delay(500);
   motor_status = FOCMotorStatus::motor_uncalibrated;
-  return 1;
 }
 
 
@@ -157,31 +159,25 @@ int  BLDCMotor::initFOC() {
     // added the shaft_angle update
     sensor->update();
     shaft_angle = shaftAngle();
-
-    // aligning the current sensor - can be skipped
-    // checks if driver phases are the same as current sense phases
-    // and checks the direction of measuremnt.
-    if(exit_flag){
-      if(current_sense){ 
-        if (!current_sense->initialized) {
-          motor_status = FOCMotorStatus::motor_calib_failed;
-          SIMPLEFOC_DEBUG("MOT: Init FOC error, current sense not initialized");
-          exit_flag = 0;
-        }else{
-          exit_flag *= alignCurrentSense();
-        }
-      }
-      else { SIMPLEFOC_DEBUG("MOT: No current sense."); }
-    }
-
-  } else {
+  }else {
+    exit_flag = 0; // no FOC without sensor
     SIMPLEFOC_DEBUG("MOT: No sensor.");
-    if ((controller == MotionControlType::angle_openloop || controller == MotionControlType::velocity_openloop)){
-      exit_flag = 1;    
-      SIMPLEFOC_DEBUG("MOT: Openloop only!");
-    }else{
-      exit_flag = 0; // no FOC without sensor
+  }
+
+  // aligning the current sensor - can be skipped
+  // checks if driver phases are the same as current sense phases
+  // and checks the direction of measuremnt.
+  if(exit_flag){
+    if(current_sense){ 
+      if (!current_sense->initialized) {
+        motor_status = FOCMotorStatus::motor_calib_failed;
+        SIMPLEFOC_DEBUG("MOT: Init FOC error, current sense not initialized");
+        exit_flag = 0;
+      }else{
+        exit_flag *= alignCurrentSense();
+      }
     }
+    else { SIMPLEFOC_DEBUG("MOT: No current sense."); }
   }
 
   if(exit_flag){
@@ -203,7 +199,7 @@ int BLDCMotor::alignCurrentSense() {
   SIMPLEFOC_DEBUG("MOT: Align current sense.");
 
   // align current sense and the driver
-  exit_flag = current_sense->driverAlign(voltage_sensor_align, modulation_centered);
+  exit_flag = current_sense->driverAlign(voltage_sensor_align);
   if(!exit_flag){
     // error in current sense - phase either not measured or bad connection
     SIMPLEFOC_DEBUG("MOT: Align error!");
@@ -226,10 +222,6 @@ int BLDCMotor::alignSensor() {
   // stop init if not found index
   if(!exit_flag) return exit_flag;
 
-  // v2.3.3 fix for R_AVR_7_PCREL against symbol" bug for AVR boards
-  // TODO figure out why this works
-  float voltage_align = voltage_sensor_align;
-
   // if unknown natural direction
   if(sensor_direction==Direction::UNKNOWN){
 
@@ -237,7 +229,7 @@ int BLDCMotor::alignSensor() {
     // move one electrical revolution forward
     for (int i = 0; i <=500; i++ ) {
       float angle = _3PI_2 + _2PI * i / 500.0f;
-      setPhaseVoltage(voltage_align, 0,  angle);
+      setPhaseVoltage(voltage_sensor_align, 0,  angle);
 	    sensor->update();
       _delay(2);
     }
@@ -247,13 +239,13 @@ int BLDCMotor::alignSensor() {
     // move one electrical revolution backwards
     for (int i = 500; i >=0; i-- ) {
       float angle = _3PI_2 + _2PI * i / 500.0f ;
-      setPhaseVoltage(voltage_align, 0,  angle);
+      setPhaseVoltage(voltage_sensor_align, 0,  angle);
 	    sensor->update();
       _delay(2);
     }
     sensor->update();
     float end_angle = sensor->getAngle();
-    // setPhaseVoltage(0, 0, 0);
+    setPhaseVoltage(0, 0, 0);
     _delay(200);
     // determine the direction the sensor moved
     float moved =  fabs(mid_angle - end_angle);
@@ -281,7 +273,7 @@ int BLDCMotor::alignSensor() {
   if(!_isset(zero_electric_angle)){
     // align the electrical phases of the motor and sensor
     // set angle -90(270 = 3PI/2) degrees
-    setPhaseVoltage(voltage_align, 0,  _3PI_2);
+    setPhaseVoltage(voltage_sensor_align, 0,  _3PI_2);
     _delay(700);
     // read the sensor
     sensor->update();
@@ -394,9 +386,6 @@ void BLDCMotor::loopFOC() {
 // - if target is not set it uses motor.target value
 void BLDCMotor::move(float new_target) {
 
-  // set internal target variable
-  if(_isset(new_target)) target = new_target;
-  
   // downsampling (optional)
   if(motion_cnt++ < motion_downsample) return;
   motion_cnt = 0;
@@ -414,6 +403,8 @@ void BLDCMotor::move(float new_target) {
 
   // if disabled do nothing
   if(!enabled) return;
+  // set internal target variable
+  if(_isset(new_target)) target = new_target;
   
   // calculate the back-emf voltage if KV_rating available U_bemf = vel*(1/KV)
   if (_isset(KV_rating)) voltage_bemf = shaft_velocity/(KV_rating*_SQRT3)/_RPM_TO_RADS;
@@ -435,16 +426,23 @@ void BLDCMotor::move(float new_target) {
       }
       break;
     case MotionControlType::angle:
+    case MotionControlType::angle_nocascade:
       // TODO sensor precision: this calculation is not numerically precise. The target value cannot express precise positions when
       //                        the angles are large. This results in not being able to command small changes at high position values.
       //                        to solve this, the delta-angle has to be calculated in a numerically precise way.
       // angle set point
       shaft_angle_sp = target;
-      // calculate velocity set point
-      shaft_velocity_sp = feed_forward_velocity + P_angle( shaft_angle_sp - shaft_angle );
-      shaft_velocity_sp = _constrain(shaft_velocity_sp,-velocity_limit, velocity_limit);
-      // calculate the torque command - sensor precision: this calculation is ok, but based on bad value from previous calculation
-      current_sp = PID_velocity(shaft_velocity_sp - shaft_velocity); // if voltage torque control
+      if (controller == MotionControlType::angle) {
+        // calculate velocity set point
+        shaft_velocity_sp = feed_forward_velocity + P_angle( shaft_angle_sp - shaft_angle );
+        shaft_velocity_sp = _constrain(shaft_velocity_sp,-velocity_limit, velocity_limit);
+        // calculate the torque command - sensor precision: this calculation is ok, but based on bad value from previous calculation
+        current_sp = PID_velocity(shaft_velocity_sp - shaft_velocity); // if voltage torque control
+      }
+      else {
+        // no velocity control
+        current_sp = P_angle( shaft_angle_sp - shaft_angle );
+      }
       // if torque controlled through voltage
       if(torque_controller == TorqueControlType::voltage){
         // use voltage if phase-resistance not provided
