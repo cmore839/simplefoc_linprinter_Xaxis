@@ -42,14 +42,14 @@ float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
 
 float voltage_set = 31;
-float M_angle_P = 100;
-float M_velocity_P = 0.1;
+float M_angle_P = 50;
+float M_velocity_P = 0.2;
 float M_velocity_I = 0.0;
 float current_bandwidth = 100;
 
 //Inline sense and Step/Dir
-LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A0, A2, _NC);
-LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A1, A3, _NC);
+LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
+LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
 StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
 void onStep() { SD1.handle(); } 
 
@@ -113,12 +113,13 @@ void setup() {
   DR1.init();
   CS1.linkDriver(&DR1);
   M1.linkDriver(&DR1);
-  M1.init();
   CS1.init();
+  CS1.gain_a *= -1;
   M1.linkCurrentSense(&CS1);
   M1.foc_modulation = FOCModulationType::SpaceVectorPWM;
   M1.controller = MotionControlType::angle;
   M1.torque_controller = TorqueControlType::foc_current;
+  M1.init();
   M1.initFOC(); //skip for open loop
   Serial.println("***M1 Init***");
   delay(1000);
@@ -161,12 +162,13 @@ void setup() {
   DR2.init();
   CS2.linkDriver(&DR2);
   M2.linkDriver(&DR2);
-  M2.init();
   CS2.init();
+  CS2.gain_a *= -1;
   M2.linkCurrentSense(&CS2);
   M2.foc_modulation = FOCModulationType::SpaceVectorPWM;
   M2.controller = MotionControlType::angle;
   M2.torque_controller = TorqueControlType::foc_current;
+  M2.init();
   M2.initFOC(); //skip for open loop
   Serial.println("***M2 Init***");
   delay(1000);
