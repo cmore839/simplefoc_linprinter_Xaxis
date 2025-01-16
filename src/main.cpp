@@ -13,6 +13,8 @@ BLDCMotor M1 = BLDCMotor(2); //Probably leave as 2 for every linear motor combo
 BLDCMotor M2 = BLDCMotor(2);
 BLDCDriver3PWM DR1 = BLDCDriver3PWM(PC9, PB4, PC7, PA9); //M1 - Lower
 BLDCDriver3PWM DR2 = BLDCDriver3PWM(PB10, PB3, PA5, PA8); //M2 - Upper
+// BLDCDriver3PWM DR1 = BLDCDriver3PWM(PC9, PB5, PC6, PA9); //M1 - Lower
+// BLDCDriver3PWM DR2 = BLDCDriver3PWM(5, 9, 6, 8); //M2 - Upper
 Encoder E1 = Encoder(PC6, PC8, 1110); //M1 - Lower, X1=1108-1109 9/12/24
 Encoder E2 = Encoder(PB1, PB2, 1110); //M2 - Upper, X2=1110, 9/12/24
 void doA1(){E1.handleA();}
@@ -45,11 +47,13 @@ float voltage_set = 31;
 float M_angle_P = 50;
 float M_velocity_P = 0.2;
 float M_velocity_I = 0.0;
-float current_bandwidth = 100;
+float current_bandwidth = 200;
 
 //Inline sense and Step/Dir
 LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
 LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
+// LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
+// LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
 StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
 void onStep() { SD1.handle(); } 
 
@@ -82,9 +86,10 @@ void setup() {
   M1.velocity_limit = 200;
   M1.voltage_limit = voltage_set;
   M1.current_limit = 99999;
-  DR1.pwm_frequency = 20000;
+  DR1.pwm_frequency = 50000;
   DR1.voltage_power_supply = voltage_set;
   M1.voltage_sensor_align = 8;
+  E1.min_elapsed_time = 0.000050; //20kHz sensor update
 
   // velocity PID controller parameters
   M1.PID_velocity.P = M_velocity_P;
@@ -134,6 +139,7 @@ void setup() {
   M2.voltage_sensor_align = M1.voltage_sensor_align;
   DR2.pwm_frequency = DR1.pwm_frequency;
   DR2.voltage_power_supply = DR1.voltage_power_supply;
+  E2.min_elapsed_time = E1.min_elapsed_time;
 
   // velocity PID controller parameters
   M2.PID_velocity.P = M1.PID_velocity.P;
@@ -163,7 +169,7 @@ void setup() {
   CS2.linkDriver(&DR2);
   M2.linkDriver(&DR2);
   CS2.init();
-  CS2.gain_a *= -1;
+  //CS2.gain_a *= -1;
   M2.linkCurrentSense(&CS2);
   M2.foc_modulation = FOCModulationType::SpaceVectorPWM;
   M2.controller = MotionControlType::angle;
