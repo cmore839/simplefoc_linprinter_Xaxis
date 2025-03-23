@@ -37,12 +37,13 @@ int t = 0;
 int enableKLIP = 0;
 int enablecount = 0;
 int enablelatch = 0;
+int startupcount = 0;
 unsigned int timestamp = micros();
 float phase_resistance = 6.80;
 float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
 
-float current_bandwidth = 400;
+float current_bandwidth = 200;
 
 // CURRENT=200, P=50
 // CURRENT=300, P=110, PRETTY GOOD, COULD GO HIGHER
@@ -53,6 +54,22 @@ LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
 LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
 StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
 void onStep() { SD1.handle(); } 
+
+void startup(){
+  while (startupcount < 30000000){
+    startupcount = micros();
+    M1.velocity_limit = 2;
+    M2.velocity_limit = 2;
+    M1.loopFOC();
+    M2.loopFOC();
+    M1.move(received_angle);
+    M2.move(received_angle);
+  }
+  M1.velocity_limit = 999999;
+  M2.velocity_limit = 999999;
+  M1.disable();
+  M2.disable();
+}
 
 void setup() {
   Serial.begin(115200);
@@ -69,7 +86,7 @@ void setup() {
   M1.linkSensor(&E1);
 
   // setting the limits
-  M1.velocity_limit = 999999;//99999
+  M1.velocity_limit = 99999;//99999
   M1.voltage_limit = 31;
   M1.current_limit = 99999;
   DR1.pwm_frequency = 20000;
@@ -78,14 +95,14 @@ void setup() {
   E1.min_elapsed_time = 0.000050; //20kHz sensor update
 
   // velocity PID controller parameters
-  M1.PID_velocity.P = 0.2;
-  M1.PID_velocity.I = 0;
+  M1.PID_velocity.P = 0.15;
+  M1.PID_velocity.I = 0;//
   M1.PID_velocity.D = 0;
   M1.PID_velocity.output_ramp = 0;
-  M1.LPF_velocity.Tf = 0;
+  M1.LPF_velocity.Tf = 0.0002;
    
   // angle PID controller 
-  M1.P_angle.P = 80;
+  M1.P_angle.P = 90;
   M1.P_angle.I = 0;
   M1.P_angle.D = 0;
   M1.P_angle.output_ramp = 0;
@@ -96,8 +113,8 @@ void setup() {
   M1.PID_current_q.I= M1.PID_current_q.P*phase_resistance/q_phase_inductance;
   M1.PID_current_d.P= d_phase_inductance*current_bandwidth*_2PI;
   M1.PID_current_d.I = M1.PID_current_d.P*phase_resistance/d_phase_inductance;
-  M1.LPF_current_q.Tf = 1/(_2PI*1.1f*current_bandwidth); 
-  M1.LPF_current_d.Tf = 1/(_2PI*1.1f*current_bandwidth);
+  M1.LPF_current_q.Tf = 1/(_2PI*1.0f*current_bandwidth); 
+  M1.LPF_current_d.Tf = 1/(_2PI*1.0f*current_bandwidth);
   M1.motion_downsample = 0; // - times (default 0 - disabled)
 
   // init
@@ -108,8 +125,9 @@ void setup() {
   CS1.gain_a *= -1;
   M1.linkCurrentSense(&CS1);
   M1.foc_modulation = FOCModulationType::SpaceVectorPWM;
-  M1.controller = MotionControlType::angle_nocascade;
+  M1.controller = MotionControlType::angle;
   M1.torque_controller = TorqueControlType::foc_current;
+
   M1.init();
   M1.initFOC(); //skip for open loop
   Serial.println("***M1 Init***");
@@ -158,7 +176,7 @@ void setup() {
   CS2.gain_a *= -1;
   M2.linkCurrentSense(&CS2);
   M2.foc_modulation = FOCModulationType::SpaceVectorPWM;
-  M2.controller = MotionControlType::angle_nocascade;
+  M2.controller = MotionControlType::angle;
   M2.torque_controller = TorqueControlType::foc_current;
   M2.init();
   M2.initFOC(); //skip for open loop
@@ -169,8 +187,8 @@ void setup() {
   SD1.enableInterrupt(onStep);
   SD1.attach(&received_angle);
   pinMode(PB7,INPUT); // X axis klipper enable pin
-  M1.disable();
-  M2.disable();
+  received_angle = M2.shaft_angle;
+  startup();
 }
 
 void loop() {
@@ -192,11 +210,13 @@ void loop() {
   if (loopcounter == loopiter){
     start = micros();
   }
+  if (enableKLIP == 1){
   M1.loopFOC();
   M2.loopFOC();
   M1.move(received_angle);
   M2.move(received_angle);
-    if (loopcounter == loopiter){
+  }
+  if (loopcounter == loopiter){
     //Loop time finish 
     finish = micros();
     looptime = (finish - start);
@@ -239,7 +259,7 @@ void loop() {
     loopcounter = 0;
   }
   //Following error disable code if things get really bad! Checked approx every 3-4 seconds
-  if (followerrorcount == 60000){
+  if (followerrorcount == 10000){
     if (position_error1 > 20.0 || position_error1 < -20.0){
       if (enableKLIP == 1){
       M1.disable();
