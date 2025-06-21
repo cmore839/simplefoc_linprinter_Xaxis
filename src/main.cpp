@@ -26,6 +26,7 @@ float actual_distance1_velocity = 0;
 float actual_distance2_velocity = 0;
 float position_error1 = 0;
 float position_error2 = 0;
+float received_velocity = 0.0f;
 float loop_count = 0;
 unsigned long start;
 unsigned long finish;
@@ -42,6 +43,7 @@ unsigned int timestamp = micros();
 float phase_resistance = 6.80;
 float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
+float motor_enable_offset = 0.0f;
 
 float current_bandwidth = 200;
 
@@ -58,17 +60,18 @@ void onStep() { SD1.handle(); }
 void startup(){
   while (startupcount < 30000000){
     startupcount = micros();
-    M1.velocity_limit = 2;
-    M2.velocity_limit = 2;
+    M1.velocity_limit = 6;
+    M2.velocity_limit = 6;
     M1.loopFOC();
     M2.loopFOC();
-    M1.move(received_angle);
-    M2.move(received_angle);
+    M1.move(0);
+    M2.move(0);
   }
-  M1.velocity_limit = 999999;
-  M2.velocity_limit = 999999;
+  M1.velocity_limit = 50;
+  M2.velocity_limit = 50;
   M1.disable();
   M2.disable();
+  received_angle = 0;
 }
 
 void setup() {
@@ -185,7 +188,7 @@ void setup() {
 
   SD1.init();
   SD1.enableInterrupt(onStep);
-  SD1.attach(&received_angle);
+  SD1.attach(&received_angle, &received_velocity);
   pinMode(PB7,INPUT); // X axis klipper enable pin
   received_angle = M2.shaft_angle;
   startup();
@@ -211,6 +214,8 @@ void loop() {
     start = micros();
   }
   if (enableKLIP == 1){
+  M1.feed_forward_velocity = received_velocity;
+  M2.feed_forward_velocity = received_velocity;
   M1.loopFOC();
   M2.loopFOC();
   M1.move(received_angle);
@@ -260,14 +265,14 @@ void loop() {
   }
   //Following error disable code if things get really bad! Checked approx every 3-4 seconds
   if (followerrorcount == 10000){
-    if (position_error1 > 20.0 || position_error1 < -20.0){
+    if (position_error1 > 2.0 || position_error1 < -2.0){
       if (enableKLIP == 1){
       M1.disable();
       M2.disable();
       while(1);
       }
     }
-    if (position_error2 > 20.0 || position_error2 < -20.0){
+    if (position_error2 > 2.0 || position_error2 < -2.0){
       if (enableKLIP == 1){
       M1.disable();
       M2.disable();
@@ -276,7 +281,7 @@ void loop() {
     }
     followerrorcount = 0;
   }
-
+  SD1.update();
   followerrorcount++;
   loopcounter++;
   enablecount++;
