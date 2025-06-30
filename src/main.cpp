@@ -2,6 +2,7 @@
 #include "SimpleFOC.h"
 #include "SimpleFOCDrivers.h"
 #include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
+#include "chirp_profile.h"
 
 //Motor & Encoder Setup
 BLDCMotor M1 = BLDCMotor(2); //Probably leave as 2 for every linear motor combo
@@ -27,6 +28,7 @@ float actual_distance2_velocity = 0;
 float position_error1 = 0;
 float position_error2 = 0;
 float received_velocity = 0.0f;
+float Aset_velocity = 0.0f;
 float loop_count = 0;
 unsigned long start;
 unsigned long finish;
@@ -44,12 +46,11 @@ float phase_resistance = 6.80;
 float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
 float motor_enable_offset = 0.0f;
+float current_bandwidth = 330; //Hz
+float Apos_ref = 0.0f;
+float enable_signal = 0.0;
 
-float current_bandwidth = 200;
-
-// CURRENT=200, P=50
-// CURRENT=300, P=110, PRETTY GOOD, COULD GO HIGHER
-// Current=400, P=90 starting to buzz above 100
+ChirpProfile chirp;
 
 //Inline sense and Step/Dir
 LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
@@ -58,7 +59,7 @@ StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
 void onStep() { SD1.handle(); } 
 
 void startup(){
-  while (startupcount < 30000000){
+  while (startupcount < 3000000){
     startupcount = micros();
     M1.velocity_limit = 6;
     M2.velocity_limit = 6;
@@ -67,14 +68,16 @@ void startup(){
     M1.move(0);
     M2.move(0);
   }
-  M1.velocity_limit = 50;
-  M2.velocity_limit = 50;
+  M1.velocity_limit = 999;
+  M2.velocity_limit = 999;
   M1.disable();
   M2.disable();
   received_angle = 0;
 }
 
 void setup() {
+  chirp.begin(5, 50.0, 8.0, 0.05);  // 1-25 Hz, 5s, 1 rad amplitude
+
   Serial.begin(115200);
   SimpleFOCDebug::enable();
   SimpleFOC_CORDIC_Config();
@@ -91,21 +94,21 @@ void setup() {
   // setting the limits
   M1.velocity_limit = 99999;//99999
   M1.voltage_limit = 31;
-  M1.current_limit = 99999;
+  M1.current_limit = 3.0;
   DR1.pwm_frequency = 20000;
   DR1.voltage_power_supply = M1.voltage_limit;
   M1.voltage_sensor_align = 8;
   E1.min_elapsed_time = 0.000050; //20kHz sensor update
 
   // velocity PID controller parameters
-  M1.PID_velocity.P = 0.15;
+  M1.PID_velocity.P = 0.0858; //164Hz Bandwidth
   M1.PID_velocity.I = 0;//
   M1.PID_velocity.D = 0;
   M1.PID_velocity.output_ramp = 0;
-  M1.LPF_velocity.Tf = 0.0002;
+  M1.LPF_velocity.Tf = (1/820.0);
    
   // angle PID controller 
-  M1.P_angle.P = 90;
+  M1.P_angle.P = 550.0;
   M1.P_angle.I = 0;
   M1.P_angle.D = 0;
   M1.P_angle.output_ramp = 0;
@@ -116,8 +119,8 @@ void setup() {
   M1.PID_current_q.I= M1.PID_current_q.P*phase_resistance/q_phase_inductance;
   M1.PID_current_d.P= d_phase_inductance*current_bandwidth*_2PI;
   M1.PID_current_d.I = M1.PID_current_d.P*phase_resistance/d_phase_inductance;
-  M1.LPF_current_q.Tf = 1/(_2PI*1.0f*current_bandwidth); 
-  M1.LPF_current_d.Tf = 1/(_2PI*1.0f*current_bandwidth);
+  M1.LPF_current_q.Tf = 1/(5.0*current_bandwidth); 
+  M1.LPF_current_d.Tf = 1/(5.0*current_bandwidth);
   M1.motion_downsample = 0; // - times (default 0 - disabled)
 
   // init
@@ -218,9 +221,12 @@ void loop() {
   M2.feed_forward_velocity = received_velocity;
   M1.loopFOC();
   M2.loopFOC();
+  // chirp.setFromFloat(enable_signal);  // Handles enable/disable edge logic
+  // Apos_ref = chirp.getPositionRef(); //Put this into move for chirp profile
   M1.move(received_angle);
   M2.move(received_angle);
-  }
+
+    }
   if (loopcounter == loopiter){
     //Loop time finish 
     finish = micros();
@@ -265,14 +271,14 @@ void loop() {
   }
   //Following error disable code if things get really bad! Checked approx every 3-4 seconds
   if (followerrorcount == 10000){
-    if (position_error1 > 2.0 || position_error1 < -2.0){
+    if (position_error1 > 5.0 || position_error1 < -5.0){
       if (enableKLIP == 1){
       M1.disable();
       M2.disable();
       while(1);
       }
     }
-    if (position_error2 > 2.0 || position_error2 < -2.0){
+    if (position_error2 > 5.0 || position_error2 < -5.0){
       if (enableKLIP == 1){
       M1.disable();
       M2.disable();
