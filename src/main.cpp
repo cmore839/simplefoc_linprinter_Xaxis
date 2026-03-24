@@ -56,7 +56,7 @@ float phase_resistance = 6.80;
 float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
 float motor_enable_offset = 0.0f;
-float current_bandwidth = 330; //Hz
+float current_bandwidth = 330*0.9; //Hz
 float Apos_ref = 0.0f;
 float enable_signal = 0.0;
 
@@ -109,18 +109,18 @@ void setup() {
   M1.current_limit = 3.0;
   DR1.pwm_frequency = 20000;
   DR1.voltage_power_supply = M1.voltage_limit;
-  M1.voltage_sensor_align = 8;
+  M1.voltage_sensor_align = 12;
   E1.min_elapsed_time = 0.000050; //20kHz sensor update
 
   // velocity PID controller parameters
-  M1.PID_velocity.P = 0.0858; //164Hz Bandwidth
+  M1.PID_velocity.P = 0.0858*0.9; //164Hz Bandwidth
   M1.PID_velocity.I = 0;//
   M1.PID_velocity.D = 0;
   M1.PID_velocity.output_ramp = 0;
-  M1.LPF_velocity.Tf = (1/820.0);
+  M1.LPF_velocity.Tf = (1/(820.0*0.9));
    
   // angle PID controller 
-  M1.P_angle.P = 550.0;
+  M1.P_angle.P = 550.0*0.9;
   M1.P_angle.I = 0;
   M1.P_angle.D = 0;
   M1.P_angle.output_ramp = 0;
@@ -134,7 +134,8 @@ void setup() {
   M1.LPF_current_q.Tf = 1/(5.0*current_bandwidth); 
   M1.LPF_current_d.Tf = 1/(5.0*current_bandwidth);
   M1.motion_downsample = 0; // - times (default 0 - disabled)
-  //M1.sensor_direction = Direction::CCW;
+  //M1.sensor_direction = Direction::CCW; //Y Axis
+  M1.sensor_direction = Direction::CW; //X Axis
 
   // init
   DR1.init();
@@ -187,7 +188,7 @@ void setup() {
   M2.LPF_current_q.Tf = M1.LPF_current_q.Tf; 
   M2.LPF_current_d.Tf = M1.LPF_current_d.Tf; 
   M2.motion_downsample = M1.motion_downsample;
-  //M2.sensor_direction = M1.sensor_direction;
+  M2.sensor_direction = M1.sensor_direction;
 
   // init
   DR2.init();
