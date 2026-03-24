@@ -42,6 +42,16 @@ int enablecount = 0;
 int enablelatch = 0;
 int startupcount = 0;
 unsigned int timestamp = micros();
+float E1_angle_temp = 0.0;
+float E2_angle_temp = 0.0;
+
+unsigned long error_timer_start_1 = 0;
+bool error_active_1 = false;
+unsigned long error_timer_start_2 = 0;
+bool error_active_2 = false;
+const unsigned long ERROR_TIMEOUT_MS = 2000; // 2 Seconds
+const float SLOW_ERROR_LIMIT = 5.0; // 5mm limit
+
 float phase_resistance = 6.80;
 float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
@@ -60,6 +70,7 @@ void onStep() { SD1.handle(); }
 
 void startup(){
   while (startupcount < 3000000){
+    received_angle = (M1.shaft_angle + M2.shaft_angle) / 2.0;
     startupcount = micros();
     M1.velocity_limit = 6;
     M2.velocity_limit = 6;
@@ -67,12 +78,13 @@ void startup(){
     M2.loopFOC();
     M1.move(0);
     M2.move(0);
+    M1.sensor_offset = M1.sensor_direction * M1.sensor->getAngle();
+    M2.sensor_offset = M2.sensor_direction * M2.sensor->getAngle();
   }
   M1.velocity_limit = 999;
-  M2.velocity_limit = 999;
+  M2.velocity_limit = 999; 
   M1.disable();
   M2.disable();
-  received_angle = 0;
 }
 
 void setup() {
@@ -122,11 +134,13 @@ void setup() {
   M1.LPF_current_q.Tf = 1/(5.0*current_bandwidth); 
   M1.LPF_current_d.Tf = 1/(5.0*current_bandwidth);
   M1.motion_downsample = 0; // - times (default 0 - disabled)
+  //M1.sensor_direction = Direction::CCW;
 
   // init
   DR1.init();
   CS1.linkDriver(&DR1);
   M1.linkDriver(&DR1);
+  CS1.skip_align = false; //true to skip current sense alignment
   CS1.init();
   CS1.gain_a *= -1;
   M1.linkCurrentSense(&CS1);
@@ -173,11 +187,13 @@ void setup() {
   M2.LPF_current_q.Tf = M1.LPF_current_q.Tf; 
   M2.LPF_current_d.Tf = M1.LPF_current_d.Tf; 
   M2.motion_downsample = M1.motion_downsample;
+  //M2.sensor_direction = M1.sensor_direction;
 
   // init
   DR2.init();
   CS2.linkDriver(&DR2);
   M2.linkDriver(&DR2);
+  CS2.skip_align = false; //true to skip current sense alignment
   CS2.init();
   CS2.gain_a *= -1;
   M2.linkCurrentSense(&CS2);
@@ -193,7 +209,6 @@ void setup() {
   SD1.enableInterrupt(onStep);
   SD1.attach(&received_angle, &received_velocity);
   pinMode(PB7,INPUT); // X axis klipper enable pin
-  received_angle = M2.shaft_angle;
   startup();
 }
 
@@ -204,6 +219,9 @@ void loop() {
       M1.disable();
       M2.disable();
       enablelatch = 0;
+      // Reset error timers when disabled so we don't trip immediately on re-enable
+      error_active_1 = false;
+      error_active_2 = false;
     }
     if (enableKLIP == 1 && enablelatch == 0){
       M1.enable();
@@ -212,35 +230,86 @@ void loop() {
     }
     enablecount = 0;
   }
-  // Loop time start, but only call every loopiter
+  
+  // Loop time start
   if (loopcounter == loopiter){
     start = micros();
   }
-  if (enableKLIP == 1){
-  M1.feed_forward_velocity = received_velocity;
-  M2.feed_forward_velocity = received_velocity;
-  M1.loopFOC();
-  M2.loopFOC();
-  // chirp.setFromFloat(enable_signal);  // Handles enable/disable edge logic
-  // Apos_ref = chirp.getPositionRef(); //Put this into move for chirp profile
-  M1.move(received_angle);
-  M2.move(received_angle);
 
-    }
+  if (enableKLIP == 1){
+    M1.feed_forward_velocity = received_velocity;
+    M2.feed_forward_velocity = received_velocity;
+    M1.loopFOC();
+    M2.loopFOC();
+    M1.move(received_angle);
+    M2.move(received_angle);
+  }
+
+  // --- CALCULATION AND SAFETY BLOCK ---
+  // Runs every 'loopiter' (approx every 10 loops)
   if (loopcounter == loopiter){
-    //Loop time finish 
     finish = micros();
     looptime = (finish - start);
+    
+    // update currents
     current1 = CS1.getPhaseCurrents();
     current2 = CS2.getPhaseCurrents();
+    
+    // update positions
     set_distance_mm = received_angle * 12.732395;
     actual_distance1_mm = M1.shaft_angle * 12.732395;
     actual_distance1_velocity = M1.shaft_velocity * 12.732395;
     actual_distance2_mm = M2.shaft_angle * 12.732395;
     actual_distance2_velocity = M2.shaft_velocity * 12.732395;
-    position_error1 = set_distance_mm-actual_distance1_mm;
-    position_error2 = set_distance_mm-actual_distance2_mm;
-    //Re apply global vars for M1 & M2, probably a better way to do this...
+    
+    // Errors calculated here
+    position_error1 = set_distance_mm - actual_distance1_mm;
+    position_error2 = set_distance_mm - actual_distance2_mm;
+
+    if (enableKLIP == 1) { 
+        // 1. HARD FAULT (Immediate Kill > 50mm)
+        if (abs(position_error1) > 50.0 || abs(position_error2) > 50.0) {
+            M1.disable();
+            M2.disable();
+            Serial.println("CRITICAL: Hard Following Error Exceeded! System Halted.");
+            while(1); 
+        }
+
+        // 2. TIMED "SLOW" FOLLOWING ERROR (Motor 1)
+        if (abs(position_error1) > SLOW_ERROR_LIMIT) {
+            if (!error_active_1) {
+                // Error just started, start the clock
+                error_timer_start_1 = millis();
+                error_active_1 = true;
+            } else if (millis() - error_timer_start_1 > ERROR_TIMEOUT_MS) {
+                // Timer exceeded 2 seconds
+                M1.disable();
+                M2.disable();
+                Serial.println("CRITICAL: Mot 1 Timed Following Error! System Halted.");
+                while(1);
+            }
+        } else {
+            // Error is within limits, reset timer flag
+            error_active_1 = false;
+        }
+
+        // 3. TIMED "SLOW" FOLLOWING ERROR (Motor 2)
+        if (abs(position_error2) > SLOW_ERROR_LIMIT) {
+            if (!error_active_2) {
+                error_timer_start_2 = millis();
+                error_active_2 = true;
+            } else if (millis() - error_timer_start_2 > ERROR_TIMEOUT_MS) {
+                M1.disable();
+                M2.disable();
+                Serial.println("CRITICAL: Mot 2 Timed Following Error! System Halted.");
+                while(1);
+            }
+        } else {
+            error_active_2 = false;
+        }
+    }
+    // ----------------------------------
+    //Re apply global vars for M1 & M2
     M2.velocity_limit = M1.velocity_limit;
     M2.voltage_limit = M1.voltage_limit;
     M2.current_limit = M1.current_limit;
@@ -265,28 +334,15 @@ void loop() {
     M2.LPF_current_q.Tf = M1.LPF_current_q.Tf; 
     M2.LPF_current_d.Tf = M1.LPF_current_d.Tf; 
     M2.motion_downsample = M1.motion_downsample;
+    E1.update();
+    E2.update();
+    E1_angle_temp = E1.getSensorAngle();
+    E2_angle_temp = E2.getSensorAngle();
     //Read klipper enable pin X Axis
     enableKLIP = digitalRead(PB7);
     loopcounter = 0;
   }
-  //Following error disable code if things get really bad! Checked approx every 3-4 seconds
-  if (followerrorcount == 10000){
-    if (position_error1 > 5.0 || position_error1 < -5.0){
-      if (enableKLIP == 1){
-      M1.disable();
-      M2.disable();
-      while(1);
-      }
-    }
-    if (position_error2 > 5.0 || position_error2 < -5.0){
-      if (enableKLIP == 1){
-      M1.disable();
-      M2.disable();
-      while(1);
-      }
-    }
-    followerrorcount = 0;
-  }
+
   SD1.update();
   followerrorcount++;
   loopcounter++;
