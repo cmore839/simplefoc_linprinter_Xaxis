@@ -65,7 +65,7 @@ ChirpProfile chirp;
 //Inline sense and Step/Dir
 LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
 LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
-StepDirListener SD1 = StepDirListener(PA15, PC12, 0.0014);
+StepDirListener SD1 = StepDirListener(PA15, PB7, 0.0014);
 void onStep() { SD1.handle(); } 
 
 void startup(){
