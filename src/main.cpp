@@ -3,14 +3,85 @@
 #include "SimpleFOCDrivers.h"
 #include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
 #include "chirp_profile.h"
+#include "communication/HWStepDirListener.h" // Your new hardware listener class
 
-//Motor & Encoder Setup
-BLDCMotor M1 = BLDCMotor(2); //Probably leave as 2 for every linear motor combo
+// ==============================================================================
+// 1. CUBEMX HARDWARE INJECTION
+// ==============================================================================
+
+// Global timer handle[cite: 7]
+TIM_HandleTypeDef htim1;
+
+// Low-level hardware clock and pin initialization (From stm32g4xx_hal_msp.c)[cite: 8]
+// WRAPPED IN extern "C" SO ARDUINO/C++ CAN LINK IT PROPERLY
+extern "C" void HAL_TIM_Encoder_MspInit(TIM_HandleTypeDef* htim_encoder)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(htim_encoder->Instance==TIM1)
+  {
+    /* Peripheral clock enable */
+    __HAL_RCC_TIM1_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    
+    /**TIM1 GPIO Configuration
+    PC0     ------> TIM1_CH1
+    PC1     ------> TIM1_CH2
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM1;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  }
+}
+
+// Timer mode and register configuration (From main.c)[cite: 7]
+static void MX_TIM1_Init(void)
+{
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 0;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 65535;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_CLOCKPLUSDIRECTION_X1;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+// ==============================================================================
+// 2. SIMPLE FOC SETUP & VARIABLES
+// ==============================================================================
+
+// Motor & Encoder Setup
+BLDCMotor M1 = BLDCMotor(2); 
 BLDCMotor M2 = BLDCMotor(2);
 BLDCDriver3PWM DR1 = BLDCDriver3PWM(PC9, PB4, PC7, PA9); //M1 - Lower
 BLDCDriver3PWM DR2 = BLDCDriver3PWM(PB10, PB3, PA5, PA8); //M2 - Upper
-Encoder E1 = Encoder(PC6, PC8, 1110); //M1 - Lower, X1=1108-1109 9/12/24
-Encoder E2 = Encoder(PB1, PB2, 1110); //M2 - Upper, X2=1110, 9/12/24
+Encoder E1 = Encoder(PC6, PC8, 1110); 
+Encoder E2 = Encoder(PB1, PB2, 1110); 
 void doA1(){E1.handleA();}
 void doB1(){E1.handleB();}
 void doA2(){E2.handleA();}
@@ -19,7 +90,7 @@ void doB2(){E2.handleB();}
 // Variables
 PhaseCurrent_s current1;
 PhaseCurrent_s current2;
-float received_angle = 0; // angle set point variable
+float received_angle = 0; 
 float actual_distance1_mm = 0;
 float actual_distance2_mm = 0;
 float set_distance_mm = 0;
@@ -49,24 +120,28 @@ unsigned long error_timer_start_1 = 0;
 bool error_active_1 = false;
 unsigned long error_timer_start_2 = 0;
 bool error_active_2 = false;
-const unsigned long ERROR_TIMEOUT_MS = 2000; // 2 Seconds
-const float SLOW_ERROR_LIMIT = 5.0; // 5mm limit
+const unsigned long ERROR_TIMEOUT_MS = 2000; 
+const float SLOW_ERROR_LIMIT = 5.0; 
 
 float phase_resistance = 6.80;
 float d_phase_inductance = 2.40/1000;
 float q_phase_inductance = 3.30/1000;
 float motor_enable_offset = 0.0f;
-float current_bandwidth = 330*0.9; //Hz
+float current_bandwidth = 330*0.9; 
 float Apos_ref = 0.0f;
 float enable_signal = 0.0;
 
 ChirpProfile chirp;
 
-//Inline sense and Step/Dir
+// Inline sense and Hardware Step/Dir
 LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
 LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
-StepDirListener SD1 = StepDirListener(PA15, PB7, 0.0014);
-void onStep() { SD1.handle(); } 
+
+// Hardware Listener Object (Linked to TIM1)
+HWStepDirListener SD1 = HWStepDirListener(&htim1, 0.0014);
+
+// Low pass filter for the feedforward velocity (5ms time constant)
+LowPassFilter v_ff_filter = LowPassFilter(0.005);
 
 void startup(){
   while (startupcount < 3000000){
@@ -88,11 +163,14 @@ void startup(){
 }
 
 void setup() {
-  chirp.begin(5, 50.0, 8.0, 0.05);  // 1-25 Hz, 5s, 1 rad amplitude
+  chirp.begin(5, 50.0, 8.0, 0.05);  
 
   Serial.begin(115200);
   SimpleFOCDebug::enable();
   SimpleFOC_CORDIC_Config();
+
+  // Initialize TIM1 Hardware BEFORE the listener attaches to it
+  MX_TIM1_Init();
 
   //Motor 1
   E1.quadrature = Quadrature::ON;
@@ -104,7 +182,7 @@ void setup() {
   M1.linkSensor(&E1);
 
   // setting the limits
-  M1.velocity_limit = 99999;//99999
+  M1.velocity_limit = 99999;
   M1.voltage_limit = 31;
   M1.current_limit = 3.0;
   DR1.pwm_frequency = 20000;
@@ -206,21 +284,25 @@ void setup() {
   Serial.println("***M2 Init***");
   delay(1000);
 
-  SD1.init();
-  SD1.enableInterrupt(onStep);
+  // Hardware Step/Dir initialization
+  SD1.init(); 
   SD1.attach(&received_angle, &received_velocity);
-  pinMode(PB7,INPUT); // X axis klipper enable pin
+  
+  pinMode(PB7, INPUT); // X axis klipper enable pin
   startup();
 }
 
 void loop() {
+  
+  // Update hardware listener (replaces the interrupt handle)
+  SD1.update();
+
   // X axis klipper enable
   if (enablecount == 1000){
     if (enableKLIP == 0){
       M1.disable();
       M2.disable();
       enablelatch = 0;
-      // Reset error timers when disabled so we don't trip immediately on re-enable
       error_active_1 = false;
       error_active_2 = false;
     }
@@ -238,8 +320,11 @@ void loop() {
   }
 
   if (enableKLIP == 1){
-    M1.feed_forward_velocity = received_velocity;
-    M2.feed_forward_velocity = received_velocity;
+    // Apply low-pass filter to finite-differenced velocity 
+    float filtered_velocity = v_ff_filter(received_velocity);
+    
+    M1.feed_forward_velocity = filtered_velocity;
+    M2.feed_forward_velocity = filtered_velocity;
     M1.loopFOC();
     M2.loopFOC();
     M1.move(received_angle);
@@ -339,12 +424,12 @@ void loop() {
     E2.update();
     E1_angle_temp = E1.getSensorAngle();
     E2_angle_temp = E2.getSensorAngle();
+    
     //Read klipper enable pin X Axis
     enableKLIP = digitalRead(PB7);
     loopcounter = 0;
   }
 
-  SD1.update();
   followerrorcount++;
   loopcounter++;
   enablecount++;
