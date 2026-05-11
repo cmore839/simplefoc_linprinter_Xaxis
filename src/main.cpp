@@ -4,72 +4,7 @@
 #include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
 #include "chirp_profile.h"
 #include "communication/HWStepDirListener.h" // Your new hardware listener class
-
-// ==============================================================================
-// 1. CUBEMX HARDWARE INJECTION
-// ==============================================================================
-
-// Global timer handle[cite: 7]
-TIM_HandleTypeDef htim1;
-
-// Low-level hardware clock and pin initialization (From stm32g4xx_hal_msp.c)[cite: 8]
-// WRAPPED IN extern "C" SO ARDUINO/C++ CAN LINK IT PROPERLY
-extern "C" void HAL_TIM_Encoder_MspInit(TIM_HandleTypeDef* htim_encoder)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  if(htim_encoder->Instance==TIM1)
-  {
-    /* Peripheral clock enable */
-    __HAL_RCC_TIM1_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    
-    /**TIM1 GPIO Configuration
-    PC0     ------> TIM1_CH1
-    PC1     ------> TIM1_CH2
-    */
-    GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF2_TIM1;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-  }
-}
-
-// Timer mode and register configuration (From main.c)[cite: 7]
-static void MX_TIM1_Init(void)
-{
-  TIM_Encoder_InitTypeDef sConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  sConfig.EncoderMode = TIM_ENCODERMODE_CLOCKPLUSDIRECTION_X1;
-  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
-  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
-  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 4;
-  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
-  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
-  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 4;
-  if (HAL_TIM_Encoder_Init(&htim1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
+#include "encoders/stm32hwencoder/STM32HWEncoder.h"
 
 // ==============================================================================
 // 2. SIMPLE FOC SETUP & VARIABLES
@@ -81,7 +16,9 @@ BLDCMotor M2 = BLDCMotor(2);
 BLDCDriver3PWM DR1 = BLDCDriver3PWM(PC9, PB4, PC7, PA9); //M1 - Lower
 BLDCDriver3PWM DR2 = BLDCDriver3PWM(PB10, PB3, PA5, PA8); //M2 - Upper
 Encoder E1 = Encoder(PC6, PC8, 1110); 
+// STM32HWEncoder E1 = STM32HWEncoder(1110, PA11, PA12); 
 Encoder E2 = Encoder(PB1, PB2, 1110); 
+// STM32HWEncoder E2 = STM32HWEncoder(1110, PA14, PC6); 
 void doA1(){E1.handleA();}
 void doB1(){E1.handleB();}
 void doA2(){E2.handleA();}
@@ -134,11 +71,11 @@ float enable_signal = 0.0;
 ChirpProfile chirp;
 
 // Inline sense and Hardware Step/Dir
-LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, A2, A0, _NC);
-LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, A3, A1, _NC);
+LowsideCurrentSense CS1  = LowsideCurrentSense(0.01, 50, PA4, PA0, _NC);
+LowsideCurrentSense CS2  = LowsideCurrentSense(0.01, 50, PB0, PA1, _NC);
 
 // Hardware Listener Object (Linked to TIM1)
-HWStepDirListener SD1 = HWStepDirListener(&htim1, 0.0014);
+HWStepDirListener SD1 = HWStepDirListener(TIM1, 0.0014);
 
 // Low pass filter for the feedforward velocity (2ms time constant)
 LowPassFilter v_ff_filter = LowPassFilter(0.002);
@@ -168,9 +105,6 @@ void setup() {
   Serial.begin(115200);
   SimpleFOCDebug::enable();
   SimpleFOC_CORDIC_Config();
-
-  // Initialize TIM1 Hardware BEFORE the listener attaches to it
-  MX_TIM1_Init();
 
   //Motor 1
   E1.quadrature = Quadrature::ON;
